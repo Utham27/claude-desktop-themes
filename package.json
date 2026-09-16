@@ -1,0 +1,19 @@
+{
+  "name": "claude-desktop-themes",
+  "version": "1.0.0",
+  "description": "Claude Desktop 主题切换器 — asar patch + 实时 CSS 注入 (macOS & Windows)",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "claude-theme": "bin/claude-theme.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@electron/asar": "^4.3.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.0"
+  }
+}

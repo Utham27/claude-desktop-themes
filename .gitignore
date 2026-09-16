@@ -1,0 +1,6 @@
+node_modules/
+.claude/
+package-lock.json
+package.desktop.json
+*.log
+.DS_Store
