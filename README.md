@@ -2,6 +2,8 @@
 
 Claude Desktop 主题切换器,支持 **macOS** 与 **Windows**。
 
+本机后续调整壁纸、透明度与毛玻璃前，请先阅读 [前端样式修改指南](./前端样式修改指南.md)。项目级修改约定见 [AGENTS.md](./AGENTS.md)。
+
 不修改任何 Claude 功能逻辑,仅注入一段轮询本地 daemon 的 bootstrap,把主题 CSS `insertCSS` 进所有窗口 —— 切换主题**即时生效,无需重启应用**。原件备份为 `app.asar.orig`,随时 `unpatch` 完整还原。
 
 内置 90+ 套主题(Catppuccin / Nord / Tokyo Night / 游戏联名等),支持背景图、透明度调节、文件夹随机轮播。

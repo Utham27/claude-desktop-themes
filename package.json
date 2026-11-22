@@ -11,7 +11,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@electron/asar": "^4.3.0"
+    "@electron/asar": "^4.3.0",
+    "@electron/fuses": "^2.1.3"
   },
   "optionalDependencies": {
     "sharp": "^0.34.0"

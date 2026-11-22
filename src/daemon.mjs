@@ -8,8 +8,9 @@ import { execFile as _execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileP = promisify(_execFile);
 import { isClaudeRunning, openClaudeApp, openExternal } from './claude.mjs';
-import { buildCss, buildBackgroundCss, withAlpha } from './css-builder.mjs';
+import { buildCss } from './css-builder.mjs';
 import { loadAll, readConfig, writeConfig, themeSummaries, APP_DIR, BG_DIR, backgroundPath } from './themes.mjs';
+import { activeCss, syncActiveCss, injectorAlive } from './css-file.mjs';
 import { detect } from './patcher.mjs';
 import { IS_MAC, installDesc } from './platform.mjs';
 
@@ -30,29 +31,7 @@ async function readBody(req) {
   try { return JSON.parse(data); } catch { return {}; }
 }
 
-function activeCss() {
-  const cfg = readConfig();
-  let css = '';
-  if (cfg.activeTheme) {
-    const entry = loadAll().flat[cfg.activeTheme];
-    css = entry ? (buildCss(entry.theme) || '') : '';
-  }
-  if (cfg.background) {
-    const p = backgroundPath(cfg.background);
-    if (p) {
-      // data URI 内嵌: 不受页面 CSP img-src 限制(外链 http 图片会被拦, 用户看到"没生效")
-      const data = 'data:' + (MIME[path.extname(p).toLowerCase()] || 'image/jpeg') + ';base64,' + fs.readFileSync(p).toString('base64');
-      // 用户可调透明度(picker 滑杆): 主区 bgAlpha / 侧栏面板 bgSideAlpha
-      const mainA = clamp01(cfg.bgAlpha ?? 0.5);
-      const sideA = clamp01(cfg.bgSideAlpha ?? 0.68);
-      // 有主题: 给 token 追加透明度; 无主题: 提供带透明度的中性 fallback token
-      css = css ? withAlpha(css, mainA, sideA) + buildBackgroundCss(data)
-        : `:root,body.light,body.dark{--bg-100:0 0% 98% / ${mainA};--bg-200:0 0% 94% / ${sideA};--bg-300:0 0% 90% / ${sideA}}` + buildBackgroundCss(data);
-    }
-  }
-  return css;
-}
-
+// activeCss() 移到 css-file.mjs，守护进程和 CLI 共用；注入端读 active.css 文件。
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 
 const clamp01 = n => Math.min(1, Math.max(0, Number(n) || 0));
@@ -220,7 +199,7 @@ const server = http.createServer(async (req, res) => {
       const cfg = readConfig();
       return writeJson(res, 200, {
         claudeRunning: await isClaudeRunning(),
-        injectedAlive: Date.now() - state.injectedAliveAt < 8000,
+        injectedAlive: Date.now() - state.injectedAliveAt < 8000 || injectorAlive(),
         patched: d.patched,
         integrityOk: d.integrityOk,
         activeTheme: cfg.activeTheme,
@@ -324,6 +303,10 @@ export async function startDaemon() {
   fs.writeFileSync(PID_FILE, String(process.pid));
   log(`daemon 就绪: http://127.0.0.1:${HTTP_PORT} (pid ${process.pid})`);
   setInterval(slideshowTick, 5000);
+  // 配置（主题、背景、透明度、轮播）一变就重写 active.css，注入端 2 秒内读到。
+  const syncCss = () => { try { syncActiveCss(); } catch (e) { log('写入 active.css 失败:', e.message); } };
+  syncCss();
+  setInterval(syncCss, 1000);
 
   const shutdown = () => {
     try { fs.unlinkSync(PID_FILE); } catch { /* 忽略 */ }

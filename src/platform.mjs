@@ -16,8 +16,12 @@ export function claudeInstall() {
     const app = process.env.CDT_CLAUDE_APP || '/Applications/Claude.app';
     return { root: app, appDir: app, exe: null, resources: path.join(app, 'Contents', 'Resources') };
   }
+  // 默认优先用 scripts/sync-store-copy.mjs 生成的换肤副本 ClaudeSkinned (Store/MSIX 版无法直接 patch),
+  // 没有副本时回退到旧的 Squirrel 安装目录 AnthropicClaude
+  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  const skinned = path.join(local, 'ClaudeSkinned');
   const root = process.env.CDT_CLAUDE_ROOT
-    || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'AnthropicClaude');
+    || (fs.existsSync(skinned) ? skinned : path.join(local, 'AnthropicClaude'));
   let best = null, bestV = null;
   try {
     for (const d of fs.readdirSync(root)) {
@@ -27,7 +31,7 @@ export function claudeInstall() {
       if (!bestV || verCmp(v, bestV) > 0) { bestV = v; best = d; }
     }
   } catch { /* 目录不存在 */ }
-  const exe = path.join(root, 'claude.exe');
+  const exe = best ? path.join(root, best, 'claude.exe') : path.join(root, 'claude.exe');
   return {
     root,
     appDir: best ? path.join(root, best) : null,
@@ -51,3 +55,4 @@ export function appDataDir() {
   }
   return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'claude-desktop-themes');
 }
+

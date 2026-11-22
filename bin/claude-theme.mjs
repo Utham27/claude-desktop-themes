@@ -29,6 +29,7 @@ const help = `claude-theme — Claude Desktop 主题切换器 (macOS & Windows)
   claude-theme revert          恢复 Claude 原生外观(清除主题, 保留 patch)
   claude-theme patch           手动 patch app.asar (需 Claude 已退出)
   claude-theme unpatch         还原 app.asar 原件 (需 Claude 已退出)
+  claude-theme css             按当前配置重写 active.css (不启动守护进程)
   claude-theme status          诊断信息
   claude-theme stop            停止守护进程
 
@@ -54,7 +55,7 @@ async function waitDaemon(timeoutMs = 8000) {
 
 function startDaemonInBackground() {
   const out = fs.openSync(DAEMON_LOG, 'a');
-  const child = spawn(process.execPath, [DAEMON], { detached: true, stdio: ['ignore', out, out] });
+  const child = spawn(process.execPath, [DAEMON], { detached: true, stdio: ['ignore', out, out], windowsHide: true });
   child.unref();
 }
 
@@ -172,8 +173,16 @@ try {
         await api('/api/revert', { method: 'POST' });
       } else {
         const cfg = readConfig(); cfg.activeTheme = ''; writeConfig(cfg);
+        const { writeActiveCss } = await import('../src/css-file.mjs');
+        writeActiveCss();
       }
       console.log('已恢复 Claude 原生外观');
+      break;
+    }
+    case 'css': {
+      // 不启动守护进程，只按当前配置重写 active.css（换肤副本的注入端读这个文件）
+      const { writeActiveCss, CSS_FILE } = await import('../src/css-file.mjs');
+      console.log(writeActiveCss() ? `已写入 ${CSS_FILE}` : `${CSS_FILE} 已是最新`);
       break;
     }
     case 'status': {
@@ -207,3 +216,4 @@ try {
   console.error('错误:', e.message);
   process.exit(1);
 }
+

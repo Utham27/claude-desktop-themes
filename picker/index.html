@@ -134,14 +134,16 @@ async function pollStatus() {
         wrap.id = id;
         wrap.style.cssText = 'margin-left:10px;font-size:11px;display:inline-flex;align-items:center;gap:4px;color:var(--fog-300)';
         const inp = document.createElement('input');
-        inp.type = 'range'; inp.min = '0.1'; inp.max = '1'; inp.step = '0.02';
+        inp.type = 'range'; inp.min = '0'; inp.max = '1'; inp.step = '0.02';
+        inp.title = '底色不透明度：0% 全透明，100% 不透明';
         const val = document.createElement('span');
         const apply = (() => { let t; return v => { clearTimeout(t); t = setTimeout(async () => {
           await fetch('/api/background/alpha', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [key]: v }) });
         }, 250); }; })();
-        inp.oninput = () => { val.textContent = inp.value; apply(Number(inp.value)); };
+        const showAlpha = v => `${Math.round(Number(v) * 100)}%`;
+        inp.oninput = () => { val.textContent = showAlpha(inp.value); apply(Number(inp.value)); };
         wrap.append(label + ' ', inp, val);
-        wrap.setVal = v => { inp.value = v; val.textContent = v; };
+        wrap.setVal = v => { inp.value = v; val.textContent = showAlpha(v); };
         return wrap;
       };
       const sMain = slider('bgaslider', '主区', 'bgAlpha');

@@ -24,8 +24,10 @@ export const RESOURCES = install.resources || path.join(install.root, 'resources
 export const ASAR = path.join(RESOURCES, 'app.asar');
 export const BACKUP = path.join(RESOURCES, 'app.asar.orig');
 
-export const MAIN = '.vite/build/index.pre.js';
-export const MARK = '/*__CDT_BOOTSTRAP__*/';
+export const MAIN = path.join('.vite', 'build', 'index.pre.js');
+// 文件版注入端的标记；旧版（轮询本机 HTTP）标记见 LEGACY_MARK，带旧标记的 asar 需先 unpatch 再重新 patch。
+export const MARK = '/*__CDT_BOOTSTRAP_FILE__*/';
+const LEGACY_MARK = '/*__CDT_BOOTSTRAP__*/';
 const PLIST = path.join(install.root, 'Contents', 'Info.plist');
 const PLIST_HASH_KEY = ':ElectronAsarIntegrity:Resources/app.asar:hash';
 
@@ -75,11 +77,16 @@ export async function resignApp() {
   }
 }
 
-// 注入到 main 进程的 bootstrap: 轮询 daemon 的 /api/css, 对所有 webContents insertCSS
+// 注入到 main 进程的 bootstrap: 轮询 %APPDATA%\claude-desktop-themes\active.css, 对所有 webContents insertCSS。
+// 只读本地文件、写一个心跳文件，不发起任何网络请求（Cage 保护下本机端口不可达）。
 const BOOTSTRAP = `${MARK}
 (function(){try{
-var API='http://127.0.0.1:9343/api/css';
-var CSS='',KEYS=new WeakMap();
+var fs=require('fs'),path=require('path'),os=require('os');
+// 与 platform.mjs 的 appDataDir() 一致：macOS 用 ~/Library/Application Support，Windows 用 %APPDATA%（缺失时回退到 ~/AppData/Roaming）。
+var BASE=process.platform==='darwin'?path.join(os.homedir(),'Library','Application Support'):(process.env.APPDATA||path.join(os.homedir(),'AppData','Roaming'));
+var DIR=path.join(BASE,'claude-desktop-themes');
+var FILE=path.join(DIR,'active.css'),ALIVE=path.join(DIR,'injector-alive');
+var CSS='',SIG='',KEYS=new WeakMap();
 var electron=require('electron');
 var app=electron.app,allWc=electron.webContents;
 function apply(wc){if(!wc||wc.isDestroyed())return Promise.resolve();
@@ -87,10 +94,12 @@ function apply(wc){if(!wc||wc.isDestroyed())return Promise.resolve();
   var o=KEYS.get(wc);if(o){try{wc.removeInsertedCSS(o)}catch(e){}}
   KEYS.set(wc,k)}).catch(function(){});}catch(e){}}
 function applyAll(){allWc.getAllWebContents().forEach(apply)}
-function tick(){try{
- fetch(API,{headers:{'x-cdt':'1'}}).then(function(r){return r.ok?r.text():''})
- .then(function(c){if(c!==CSS){CSS=c;applyAll()}}).catch(function(){});
-}catch(e){}}
+function tick(){
+ try{var st=fs.statSync(FILE),sig=st.mtimeMs+':'+st.size;
+  if(sig!==SIG){var c=fs.readFileSync(FILE,'utf8');SIG=sig;if(c!==CSS){CSS=c;applyAll()}}
+ }catch(e){if(e&&e.code==='ENOENT'&&CSS){CSS='';SIG='';applyAll()}}
+ try{fs.writeFileSync(ALIVE,String(Date.now()))}catch(e){}
+}
 app.on('web-contents-created',function(_,wc){
  wc.on('did-finish-load',function(){if(CSS)apply(wc)});
 });
@@ -102,7 +111,7 @@ app.whenReady().then(function(){tick();setInterval(tick,2000)});
 // unpack 规则对齐现网 app.asar.unpacked(恰好 10 个外部文件: *.node/*.dylib + pty prebuilds + 两个 mcp 目录)
 const PACK_OPTS = {
   unpack: '*.{node,dylib}',
-  unpackDir: '{node_modules/node-pty/prebuilds,resources/github-mcp}',
+  unpackDir: '{node_modules/node-pty/prebuilds,resources/github-mcp,resources/office365-mcp}',
 };
 
 export function detect() {
@@ -223,6 +232,10 @@ export async function patchAsar() {
     asar.extractAll(ASAR, tmpExtract);
     const mainPath = path.join(tmpExtract, MAIN);
     const original = fs.readFileSync(mainPath, 'utf8');
+    // 不在旧版注入端上叠加第二份（两份会同时改样式）。
+    if (original.includes(LEGACY_MARK)) {
+      return { ok: false, error: 'app.asar 含旧版注入端，请先执行 claude-theme unpatch，或用 sync-store-copy.mjs --force 重建副本后再 patch' };
+    }
     fs.writeFileSync(mainPath, BOOTSTRAP + '\n' + original);
     rmrf(tmpAsar); rmrf(tmpUnpacked);
     await asar.createPackageWithOptions(tmpExtract, tmpAsar, PACK_OPTS);
@@ -268,3 +281,5 @@ export async function unpatchAsar() {
     return { ok: false, error: `还原失败: ${e.message}` };
   }
 }
+
+

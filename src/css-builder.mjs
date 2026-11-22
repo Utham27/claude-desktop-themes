@@ -94,13 +94,11 @@ export function buildCss(theme) {
   // 重新断言，并把框架自己的 page-bg token 指到主题上。
   // 只再断言两个变体都有的 token：缺一侧的镜像在该模式下会在计算值时失效，会把
   // 表面涂成空白。
-  const bgKeys = Object.keys(v.light).filter(k => k.startsWith('--bg-') && v.dark[k]);
-  if (bgKeys.length) {
-    const reassert = bgKeys.map(k => `${k}:var(--cdb-${k.slice(2)})!important`);
-    css += `.dframe-content-inner{${reassert.join(';')}}`;
-  }
+  // 3.x: .dframe-content 与 web 变体的 main 渐变都读 --df-bg-page。直接指向（可能带 alpha 的）
+  // --bg-100：.dframe-content-inner 会把 --bg-100 重定义为 --df-bg-page-hsl，值即同一份，
+  // 不会成环，且背景图开启时 withAlpha 的透明度能一路传到主区。
   if (v.light['--bg-100'] && v.dark['--bg-100']) {
-    css += '.dframe-root{--df-bg-page-hsl:var(--cdb-bg-100)!important;--df-bg-page:hsl(var(--cdb-bg-100))!important}';
+    css += '.dframe-root{--df-bg-page-hsl:var(--bg-100)!important;--df-bg-page:hsl(var(--bg-100))!important}';
   }
 
   // 聊天字体覆盖（可选）
@@ -133,12 +131,42 @@ export function withAlpha(css, mainA = 0.5, sideA = 0.68) {
 // 背景图层：追加在主题 CSS 之后。
 export function buildBackgroundCss(url) {
   if (!url) return '';
+  // 文字回复卡片的底色在独立 fill 层，不在带 bg- 类的容器上。
+  // 排除媒体卡片及浮层；用主题原色调制局部底色，保留卡片区分与点击行为。
+  const replyCards = 'html:root body [data-cds=Card]:not(:has(img,video,canvas,iframe)):not(:is([role=dialog],[role=menu],[role=listbox],[role=tooltip],[data-cds=Popover]) *)';
+  const cardColor = 'hsl(var(--accent-brand,25 48.8% 60.2%) / .22)';
+  const cardHoverColor = 'hsl(var(--accent-brand,25 48.8% 60.2%) / .34)';
   return ''
-    + `html{background:url(${url}) center/cover fixed no-repeat!important}`
+    // 遮罩只作用于壁纸图层，整体压暗 25%，文字和控件不跟随变暗。
+    + `html,html.cds-root,html.epitaxy-root{background:linear-gradient(rgb(0 0 0 / .25),rgb(0 0 0 / .25)) center/cover fixed no-repeat,url(${url}) center/cover fixed no-repeat!important}`
     + '#root,[id=root],body{background:transparent!important}'
     // 不加 backdrop-filter: blur 会把透出的图片糊掉; 靠透明度本身保证文字可读
     // 浮层(弹窗/菜单)必须不透明。不能用 hsl(var(--bg-100) / 0.9): withAlpha 已把
     // "/ a" 写进 token 值, 再叠 alpha → hsl(h s l / a / 0.9) 非法, 声明被丢弃, 浮层反而透明。
     // 用镜像 token --cdb-bg-100(block() 生成纯色, withAlpha 不改它); 无主题时回落纯白。
-    + '[role=dialog],[role=menu],[role=listbox],[role=tooltip]{background-color:hsl(var(--cdb-bg-100, 0 0% 100%))!important}';
+    + '[role=dialog],[role=menu],[role=listbox],[role=tooltip]{background-color:hsl(var(--cdb-bg-100, 0 0% 100%))!important}'
+    // 右侧文件/预览等面板：根容器统一给半透明主题底，内部带 bg-/surface 类的块级容器去掉自带实心底，避免多层叠成不透明
+    + '.dframe-pane,.dframe-pane-primary,.dframe-pane-extra,.epitaxy-pane-window{background-color:hsl(var(--bg-100))!important}'
+    + ':is(.dframe-pane,.dframe-pane-primary,.dframe-pane-extra,.epitaxy-pane-window) :is(div,section,aside,header,main,nav)[class*=bg-],:is(.dframe-pane,.dframe-pane-primary,.dframe-pane-extra,.epitaxy-pane-window) :is(div,section,aside,header,main,nav)[class*=surface]{background-color:transparent!important;background-image:none!important}'
+    // 输入区外层包裹容器（非圆角、含输入框的祖先）自带实心底/顶线/模糊，会形成硬边矩形，统一清掉
+    + 'div:not([class*=rounded]):has(.epitaxy-prompt-input){background:transparent!important;background-image:none!important;box-shadow:none!important;border-color:transparent!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'
+    + '.epitaxy-bottom-scrim,.epitaxy-top-scrim{background:none!important}'
+    // 不给含输入框的圆角祖先套毛玻璃：它们可能是整个聊天面板。
+    // 项目页等主区：去掉所有 backdrop-filter 模糊，让壁纸直接透出（包含输入框祖先，不再保留任何大面积模糊）
+    + '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'
+    + '[class*=blur],[class*=blur]::before,[class*=blur]::after{filter:none!important}'
+    // 清除主区内重复叠加的底色，保留卡片边框，让壁纸直接透出。
+    + ':is(.dframe-content,.dframe-main) :is(div,section,aside,header,main,nav,ul,li,a)[class*=bg-]:not(:has(.epitaxy-prompt-input)):not([class*=accent]):not([class*=danger]):not([class*=success]){background-color:transparent!important;background-image:none!important}'
+    + ':is(.dframe-content,.dframe-main) :is(div,section,a,li)[class*=bg-][class*=border]:not(:has(.epitaxy-prompt-input)){border-color:hsl(0 0% 100% / .14)!important}'
+    // 镜像 token 不含 alpha，避免与全局面板透明度重复拼接。
+    + `${replyCards}{background:transparent!important}`
+    + `${replyCards},${replyCards}>.cds-card-body{--cds-surface-1:${cardColor}!important;--cds-surface-2:${cardHoverColor}!important;--cds-border:hsl(var(--accent-brand,25 48.8% 60.2%) / .32)!important;--cds-scroll-fade-strip-color:${cardColor}!important}`
+    // 直接给填充层指定主题暖色，避免被组件自己的 surface 变量重定义成黑色。
+    + `${replyCards}>.cds-card-fill{background:${cardColor}!important}`
+    + `${replyCards}:hover,${replyCards}:hover>.cds-card-body{--cds-surface-1:${cardHoverColor}!important;--cds-scroll-fade-strip-color:${cardHoverColor}!important;--cds-border:hsl(var(--accent-brand,25 48.8% 60.2%) / .45)!important}`
+    + `${replyCards}:hover>.cds-card-fill{background:${cardHoverColor}!important}`
+    // 标题提示框使用主题强调色与底色调成暖咖色，保持实底可读，避免纯黑悬浮框。
+    + 'html:root body :is([role=tooltip],[data-cds=Tooltip]){background:color-mix(in srgb,hsl(var(--accent-brand,25 48.8% 60.2%)) 55%,hsl(var(--cdb-bg-100,15 5.9% 13.3%)))!important;--cds-tooltip-bg:color-mix(in srgb,hsl(var(--accent-brand,25 48.8% 60.2%)) 55%,hsl(var(--cdb-bg-100,15 5.9% 13.3%)))!important;--cds-tooltip-fg:hsl(var(--text-000,45 35% 84.3%))!important;color:var(--cds-tooltip-fg)!important;border-color:hsl(var(--accent-brand,25 48.8% 60.2%) / .45)!important}'
+    // 运行中的旧注入层可能残留诊断 outline；回退到应用原生轮廓而非禁用焦点提示。
+    + 'html:root :is(.epitaxy-link-chip,[data-session-spawn],[data-cds=Card],[data-card-panel],[data-cds-open-text],button[class~="group/replies"],[data-thread-rename-anchor]){outline:revert!important}';
 }
